@@ -52,6 +52,7 @@ require("dotenv/config");
 const fs = __importStar(require("fs"));
 const express_1 = __importDefault(require("express"));
 const path_1 = __importDefault(require("path"));
+const Messagesummary_1 = require("./db/Messagesummary");
 const anthropic = new sdk_1.default();
 const app = (0, express_1.default)();
 const adm_zip_1 = __importDefault(require("adm-zip"));
@@ -256,6 +257,23 @@ const pro = "You are an expert web developer creating modern websites using Reac
     "\n" +
     "Generate focused, professional websites that accomplish the user's goals efficiently. Prioritize clarity and usability over extensive content unless specifically requested. ALWAYS follow the data fetching and error prevention rules to avoid runtime errors. ALWAYS provide files in the specified format and organization.";
 const supabase = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const DATABASE_URL = process.env.DATABASE_URL; // Make sure this is in your .env file
+const messageDB = new Messagesummary_1.DrizzleMessageHistoryDB(DATABASE_URL, anthropic);
+const fileModifierWithHistory = new Messagesummary_1.IntelligentFileModifierWithDrizzle(anthropic, path_1.default.join(__dirname, "../react-base"), DATABASE_URL);
+function initializeMessageDB() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            yield messageDB.initializeStats();
+            yield fileModifierWithHistory.initialize();
+            console.log('✅ DrizzleMessageHistoryDB initialized successfully');
+        }
+        catch (error) {
+            console.error('❌ Failed to initialize DrizzleMessageHistoryDB:', error);
+        }
+    });
+}
+// Call this during server startup
+initializeMessageDB();
 app.post("/generatebackend", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { prompt } = req.body;
     try {
@@ -480,6 +498,218 @@ app.get("/zipFolder", (req, res) => __awaiter(void 0, void 0, void 0, function* 
 app.listen(3000, () => {
     console.log("Server is running on port 3000");
 });
+//@ts-ignore
+app.post("/messages", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { content, messageType, metadata } = req.body;
+        if (!content || !messageType) {
+            return res.status(400).json({
+                success: false,
+                error: "Content and messageType are required"
+            });
+        }
+        if (!['user', 'assistant'].includes(messageType)) {
+            return res.status(400).json({
+                success: false,
+                error: "messageType must be 'user' or 'assistant'"
+            });
+        }
+        const messageId = yield messageDB.addMessage(content, messageType, metadata);
+        res.json({
+            success: true,
+            data: {
+                messageId,
+                message: "Message added successfully"
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error adding message:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add message'
+        });
+    }
+}));
+// 2. Get recent conversation history
+app.get("/conversation", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const conversation = yield messageDB.getRecentConversation();
+        res.json({
+            success: true,
+            data: conversation
+        });
+    }
+    catch (error) {
+        console.error('Error getting conversation:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get conversation'
+        });
+    }
+}));
+// 3. Get conversation context (for AI prompts)
+app.get("/conversation-context", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const context = yield messageDB.getConversationContext();
+        res.json({
+            success: true,
+            data: {
+                context
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error getting conversation context:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get conversation context'
+        });
+    }
+}));
+// 4. Get conversation statistics
+app.get("/conversation-stats", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const stats = yield messageDB.getConversationStats();
+        res.json({
+            success: true,
+            data: stats
+        });
+    }
+    catch (error) {
+        console.error('Error getting conversation stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get conversation stats'
+        });
+    }
+}));
+// 5. Get all conversation summaries
+app.get("/conversation-summaries", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const summaries = yield messageDB.getAllSummaries();
+        res.json({
+            success: true,
+            data: summaries
+        });
+    }
+    catch (error) {
+        console.error('Error getting summaries:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get summaries'
+        });
+    }
+}));
+//@ts-ignore
+app.post("/modify-with-history", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { prompt } = req.body;
+        if (!prompt) {
+            return res.status(400).json({
+                success: false,
+                error: "Prompt is required"
+            });
+        }
+        console.log(`🚀 Processing modification with history: "${prompt}"`);
+        const result = yield fileModifierWithHistory.processModificationWithHistory(prompt);
+        if (result.success) {
+            console.log(`✅ Modification with history completed successfully!`);
+            res.json({
+                success: true,
+                data: {
+                    workflow: "modification-with-history",
+                    selectedFiles: result.selectedFiles,
+                    approach: result.approach,
+                    modifiedRanges: ((_a = result.modifiedRanges) === null || _a === void 0 ? void 0 : _a.length) || 0,
+                    conversationContext: "Applied previous conversation context"
+                }
+            });
+        }
+        else {
+            console.log(`❌ Modification with history failed: ${result.error}`);
+            res.status(400).json({
+                success: false,
+                error: result.error || 'Modification with history failed'
+            });
+        }
+    }
+    catch (error) {
+        console.error('Error in modification with history:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error during modification with history'
+        });
+    }
+}));
+// 7. Get conversation for display (used by file modifier)
+app.get("/conversation-display", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const conversation = yield fileModifierWithHistory.getConversationForDisplay();
+        res.json({
+            success: true,
+            data: conversation
+        });
+    }
+    catch (error) {
+        console.error('Error getting conversation for display:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get conversation for display'
+        });
+    }
+}));
+// 8. Clear all conversation data (for reset)
+app.delete("/conversation", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        yield messageDB.clearAllData();
+        res.json({
+            success: true,
+            data: {
+                message: "All conversation data cleared successfully"
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error clearing conversation data:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to clear conversation data'
+        });
+    }
+}));
+// 9. Add sample conversation
+app.post("/sample-conversation", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // Add some sample messages
+        yield messageDB.addMessage("I want to add a dark mode toggle to my React app", 'user');
+        yield messageDB.addMessage("I'll help you add a dark mode toggle. I'll create a theme context and update your components.", 'assistant', {
+            fileModifications: ['src/contexts/ThemeContext.tsx', 'src/App.tsx'],
+            modificationApproach: 'TARGETED_NODES',
+            modificationSuccess: true
+        });
+        yield messageDB.addMessage("Can you also add a settings page for theme preferences?", 'user');
+        yield messageDB.addMessage("I'll create a settings page with theme preferences and save them to localStorage.", 'assistant', {
+            fileModifications: ['src/pages/SettingsPage.tsx', 'src/hooks/useTheme.ts'],
+            modificationApproach: 'FULL_FILE',
+            modificationSuccess: true
+        });
+        res.json({
+            success: true,
+            data: {
+                message: "Sample conversation added successfully"
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error adding sample conversation:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add sample conversation'
+        });
+    }
+}));
 // async function main() {
 //   const responseData = JSON.stringify(res, null, 2);
 //   fs.writeFileSync("claude-response.json", responseData);

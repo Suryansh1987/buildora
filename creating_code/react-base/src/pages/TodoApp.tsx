@@ -65,27 +65,27 @@ export function TodoApp() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
-          <CheckSquare className="h-12 w-12 text-black mx-auto mb-4 animate-pulse" />
-          <p className="text-lg text-gray-800">Loading your todos...</p>
+          <CheckSquare className="h-12 w-12 text-white mx-auto mb-4 animate-pulse" />
+          <p className="text-lg text-white">Loading your todos...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white py-8 px-4">
+    <div className="min-h-screen bg-black py-8 px-4">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
-            <CheckSquare className="h-10 w-10 text-black mr-3" />
-            <h1 className="text-4xl font-bold text-black">
-              Todo Master
+            <CheckSquare className="h-10 w-10 text-white mr-3" />
+<h1 className="text-4xl font-bold text-white">
+              Master Blaster
             </h1>
           </div>
-          <p className="text-gray-800 text-lg">Organize your tasks and boost your productivity</p>
+          <p className="text-white text-lg">Organize your tasks and boost your productivity</p>
         </div>
 
         {/* Stats */}
@@ -101,12 +101,12 @@ export function TodoApp() {
         {/* Add Todo Button - Mobile */}
         {!showForm && !editingTodo && (
           <div className="mb-6 md:hidden">
-            <Button 
+<Button 
               onClick={() => setShowForm(true)}
-              className="w-full bg-black text-white hover:bg-gray-800"
+              className="w-full bg-white text-black hover:bg-gray-200"
               size="lg"
             >
-              <Plus className="h-5 w-5 mr-2" />
+              <img src="/path/to/your/image.png" alt="Add Todo" className="h-5 w-5 mr-2" />
               Add Todo
             </Button>
           </div>
@@ -125,12 +125,12 @@ export function TodoApp() {
         {/* Add Todo Button - Desktop */}
         {!showForm && !editingTodo && (
           <div className="hidden md:block mb-6">
-            <Button 
+<Button 
               onClick={() => setShowForm(true)}
-              className="bg-black text-white hover:bg-gray-800"
+              className="bg-white text-black hover:bg-gray-200"
               size="lg"
             >
-              <Plus className="h-5 w-5 mr-2" />
+              <img src="/path/to/your/image.png" alt="Add Todo" className="h-5 w-5 mr-2" />
               Add Todo
             </Button>
           </div>
@@ -139,9 +139,9 @@ export function TodoApp() {
         {/* Todos List */}
         <div className="space-y-4">
           {todos.length === 0 ? (
-            <div className="text-center py-12">
-              <CheckSquare className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-800 mb-2">
+            <div className="text-center py-12 bg-white rounded-lg">
+              <CheckSquare className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-black mb-2">
                 {filters.searchTerm || filters.status !== 'all' || filters.priority !== 'all' || filters.category !== 'all'
                   ? 'No todos match your filters'
                   : 'No todos yet'

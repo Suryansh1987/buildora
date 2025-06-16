@@ -6,10 +6,11 @@ interface CodeRange {
     endColumn: number;
     originalCode: string;
 }
-interface ModificationResult {
+export interface ModificationResult {
     success: boolean;
     selectedFiles?: string[];
     approach?: 'FULL_FILE' | 'TARGETED_NODES';
+    reasoning?: string;
     modifiedRanges?: Array<{
         file: string;
         range: CodeRange;
@@ -38,6 +39,6 @@ export declare class IntelligentFileModifier {
     private identifyTargetNodes;
     private modifyCodeSnippets;
     private applyModifications;
-    processModification(prompt: string): Promise<ModificationResult>;
+    processModification(prompt: string, conversationContext?: string): Promise<ModificationResult>;
 }
 export {};

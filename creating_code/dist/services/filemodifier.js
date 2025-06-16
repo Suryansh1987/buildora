@@ -23,16 +23,13 @@ class IntelligentFileModifier {
         this.reactBasePath = reactBasePath;
         this.projectFiles = new Map();
     }
-    // STEP 1: Build project file tree + metadata
     buildProjectTree() {
         return __awaiter(this, void 0, void 0, function* () {
             const srcPath = (0, path_1.join)(this.reactBasePath, 'src');
             try {
                 yield fs_1.promises.access(srcPath);
-                console.log(`📁 Building project tree from: ${srcPath}`);
             }
             catch (error) {
-                console.error(`❌ src directory not found: ${srcPath}`);
                 return;
             }
             const scanDir = (dir_1, ...args_1) => __awaiter(this, [dir_1, ...args_1], void 0, function* (dir, relativePath = '') {
@@ -50,20 +47,16 @@ class IntelligentFileModifier {
                     }
                 }
                 catch (error) {
-                    console.error(`❌ Error scanning directory ${dir}:`, error);
+                    console.error(`Error scanning directory ${dir}:`, error);
                 }
             });
             yield scanDir(srcPath);
-            console.log(`✅ Project tree built. Found ${this.projectFiles.size} React files.`);
         });
     }
-    // Analyze individual file for metadata
     analyzeFile(filePath, relativePath) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                // Skip UI components folder
                 if (relativePath.includes('components/ui/') || relativePath.includes('components\\ui\\')) {
-                    console.log(`⏭️ Skipping UI component: ${relativePath}`);
                     return;
                 }
                 const content = yield fs_1.promises.readFile(filePath, 'utf8');
@@ -83,94 +76,66 @@ class IntelligentFileModifier {
                     isMainFile: this.isMainFile(filePath, content)
                 };
                 this.projectFiles.set(projectFile.relativePath, projectFile);
-                console.log(`📄 Analyzed: ${projectFile.relativePath} (${lines.length} lines, buttons: ${projectFile.hasButtons}, signin: ${projectFile.hasSignin})`);
             }
             catch (error) {
                 console.error(`Failed to analyze file ${relativePath}:`, error);
             }
         });
     }
-    // Escape regex special characters
     escapeRegExp(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
-    // Fallback: Go through all files one by one to find relevant content (FILES ONLY)
     fallbackFileSearch(prompt) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🔍 FALLBACK: No files identified by Claude, searching all files one by one...`);
-            console.log(`📁 Searching through ${this.projectFiles.size} files for: "${prompt}"`);
             if (this.projectFiles.size === 0) {
-                console.log('❌ No files to search through');
                 return [];
             }
-            const searchTerms = prompt.toLowerCase().split(' ').filter(term => term.length > 2); // Filter out short words
+            const searchTerms = prompt.toLowerCase().split(' ').filter(term => term.length > 2);
             const matches = [];
-            console.log(`🔎 Searching for meaningful terms: ${searchTerms.join(', ')}`);
             for (const [relativePath, file] of this.projectFiles.entries()) {
                 let score = 0;
                 const fileContentLower = file.content.toLowerCase();
-                console.log(`\n📄 Checking: ${relativePath}`);
-                console.log(`   - Has buttons: ${file.hasButtons}`);
-                console.log(`   - Has signin: ${file.hasSignin}`);
-                console.log(`   - Is main file: ${file.isMainFile}`);
-                // Score based on meaningful prompt keywords only
                 searchTerms.forEach(term => {
-                    if (term.length > 2) { // Only score meaningful terms
+                    if (term.length > 2) {
                         const contentMatches = (fileContentLower.match(new RegExp(this.escapeRegExp(term), 'g')) || []).length;
-                        if (contentMatches > 0 && contentMatches < 100) { // Avoid over-common words
-                            score += Math.min(contentMatches * 10, 100); // Cap individual term scoring
-                            console.log(`   - Found '${term}' ${contentMatches} times in content (+${Math.min(contentMatches * 10, 100)})`);
+                        if (contentMatches > 0 && contentMatches < 100) {
+                            score += Math.min(contentMatches * 10, 100);
                         }
                         if (file.name.toLowerCase().includes(term)) {
                             score += 20;
-                            console.log(`   - Found '${term}' in filename (+20)`);
                         }
                     }
                 });
-                // Boost score for relevant content
                 if (prompt.includes('signin') || prompt.includes('login') || prompt.includes('sign in')) {
                     if (file.hasSignin) {
                         score += 50;
-                        console.log(`   - Has signin content (+50)`);
                     }
                     if (file.hasButtons) {
                         score += 25;
-                        console.log(`   - Has buttons (+25)`);
                     }
                 }
                 if (prompt.includes('button')) {
                     if (file.hasButtons) {
                         score += 40;
-                        console.log(`   - Has buttons for button request (+40)`);
                     }
                 }
-                // Boost main files
                 if (file.isMainFile) {
                     score += 10;
-                    console.log(`   - Is main file (+10)`);
                 }
-                console.log(`   - Total score: ${score}`);
-                if (score > 20) { // Higher threshold to avoid noise
+                if (score > 20) {
                     matches.push({ file, score });
                 }
             }
             if (matches.length > 0) {
-                // Sort by score and take top matches
                 matches.sort((a, b) => b.score - a.score);
-                const topMatches = matches.slice(0, 3); // Take top 3 files
-                const files = topMatches.map(m => m.file.relativePath);
-                console.log(`\n✅ Fallback found ${files.length} matching files:`);
-                files.forEach(f => console.log(`   - ${f}`));
-                return files;
+                const topMatches = matches.slice(0, 3);
+                return topMatches.map(m => m.file.relativePath);
             }
-            console.log('❌ No matching files found in fallback search');
             return [];
         });
     }
-    // Determine scope for fallback files using Claude
     determineScopeForFallbackFiles(prompt, files) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🤖 Claude determining scope for fallback files: "${prompt}"`);
             const claudePrompt = `
 **User Request:** "${prompt}"
 **Files Found:** ${files.join(', ')}
@@ -214,27 +179,21 @@ TARGETED_NODES
                 if ((firstBlock === null || firstBlock === void 0 ? void 0 : firstBlock.type) === 'text') {
                     const text = firstBlock.text.trim();
                     if (text.includes('FULL_FILE')) {
-                        console.log(`📋 Claude determined scope: FULL_FILE`);
                         return 'FULL_FILE';
                     }
                 }
-                console.log(`📋 Claude determined scope: TARGETED_NODES`);
                 return 'TARGETED_NODES';
             }
             catch (error) {
                 console.error('Error determining scope:', error);
-                console.log(`📋 Defaulting to scope: TARGETED_NODES`);
                 return 'TARGETED_NODES';
             }
         });
     }
-    // STEP 3: Handle full file modification
     handleFullFileModification(prompt, filePath) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🔄 FULL_FILE modification for ${filePath}...`);
             const file = this.projectFiles.get(filePath);
             if (!file) {
-                console.error(`File not found: ${filePath}`);
                 return false;
             }
             const claudePrompt = `
@@ -266,7 +225,6 @@ ${file.content}
                     if (codeMatch) {
                         const modifiedContent = codeMatch[1].trim();
                         yield fs_1.promises.writeFile(file.path, modifiedContent, 'utf8');
-                        console.log(`💾 Saved full file modification: ${filePath}`);
                         return true;
                     }
                 }
@@ -295,7 +253,6 @@ ${file.content}
         const hasMainContent = /export\s+default|function\s+App|class\s+App/i.test(content);
         return isMainName || hasMainContent;
     }
-    // Build project summary for Claude
     buildProjectSummary() {
         let summary = "**PROJECT FILE TREE + METADATA:**\n\n";
         const sortedFiles = Array.from(this.projectFiles.values())
@@ -321,21 +278,23 @@ ${file.content}
         });
         return summary;
     }
-    // STEP 2: Claude analyzes project tree to determine relevant files AND scope
-    identifyRelevantFiles(prompt) {
+    identifyRelevantFiles(prompt, conversationContext) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🤖 STEP 2: Claude analyzing project tree AND determining scope for: "${prompt}"`);
             const projectSummary = this.buildProjectSummary();
             const claudePrompt = `
 You are analyzing a React project to determine which files need modification AND the scope of changes.
 
-**User Request:** "${prompt}"
+${conversationContext ? `**Conversation Context:**
+${conversationContext}
+
+` : ''}**Current User Request:** "${prompt}"
 
 ${projectSummary}
 
 **Your Task:** 
 1. Determine which file(s) are relevant for this modification request
 2. **CRITICALLY IMPORTANT**: Determine the modification scope based on the request
+3. Consider previous conversation context when making decisions
 
 **Scope Guidelines (VERY IMPORTANT):**
 - **FULL_FILE**: Use when request involves:
@@ -345,6 +304,7 @@ ${projectSummary}
   * Adding responsive design, mobile layouts
   * Structural changes affecting entire components
   * Any request mentioning "entire", "all", "complete", "comprehensive"
+  * Building on previous comprehensive changes mentioned in context
 
 - **TARGETED_NODES**: Use when request involves:
   * Specific button colors (e.g., "make signin button red")
@@ -352,13 +312,22 @@ ${projectSummary}
   * Single element modifications
   * Small styling tweaks to specific elements
   * Adding/removing specific attributes
+  * Minor adjustments to previously modified elements
 
 **File Selection Guidelines:**
 - For signin/login requests: Look for files with signin content
 - For button styling: Look for files with buttons  
 - For layout/theme changes: Focus on main app files
+- Consider files mentioned in conversation context as candidates
 - You can select multiple files if the change affects multiple components
 - NEVER select files from components/ui/ folder (these are UI library components)
+- If context shows recent modifications to specific files, consider if current request relates to them
+
+**Context Awareness:**
+- If previous messages mention specific files being modified, consider their relevance
+- If user is building on previous changes (e.g., "also make the header darker" after dark mode), maintain consistency
+- If previous attempts failed on certain files, consider alternative files
+- Learn from successful modification patterns in the conversation
 
 **Examples:**
 - "make signin button red" → TARGETED_NODES
@@ -366,23 +335,26 @@ ${projectSummary}
 - "change layout to modern design" → FULL_FILE
 - "make header responsive" → FULL_FILE
 - "change text color of welcome message" → TARGETED_NODES
+- "also make the buttons bigger" (after button color changes) → TARGETED_NODES
+- "make the whole app dark" (following previous dark mode work) → FULL_FILE
 
 **Response Format:** Return ONLY this JSON:
 \`\`\`json
 {
   "files": ["src/App.tsx", "src/components/LoginForm.tsx"],
-  "scope": "FULL_FILE"
+  "scope": "FULL_FILE",
+  "reasoning": "Brief explanation of file selection and scope decision based on request and context"
 }
 \`\`\`
 
-**CRITICAL**: Pay special attention to scope determination - this controls the entire workflow!
+**CRITICAL**: Pay special attention to scope determination and conversation context - this controls the entire workflow!
 
-Return ONLY the JSON, no explanations.
+Return ONLY the JSON, no explanations outside the reasoning field.
     `.trim();
             try {
                 const response = yield this.anthropic.messages.create({
                     model: 'claude-3-5-sonnet-20240620',
-                    max_tokens: 400,
+                    max_tokens: 500,
                     temperature: 0,
                     messages: [{ role: 'user', content: claudePrompt }],
                 });
@@ -392,16 +364,11 @@ Return ONLY the JSON, no explanations.
                     const jsonMatch = text.match(/```json\n([\s\S]*?)```/);
                     if (jsonMatch) {
                         const result = JSON.parse(jsonMatch[1]);
-                        console.log(`🎯 Claude selected files: ${result.files.join(', ')}`);
-                        console.log(`📋 Claude determined scope: ${result.scope}`);
-                        // Log reasoning for scope decision
-                        if (result.scope === 'FULL_FILE') {
-                            console.log(`🔄 FULL_FILE approach: Will send complete file content to Claude for comprehensive modification`);
-                        }
-                        else {
-                            console.log(`🎯 TARGETED_NODES approach: Will use AST to find specific elements to modify`);
-                        }
-                        return result;
+                        return {
+                            files: result.files,
+                            scope: result.scope,
+                            reasoning: result.reasoning
+                        };
                     }
                 }
                 return { files: [], scope: 'TARGETED_NODES' };
@@ -412,12 +379,9 @@ Return ONLY the JSON, no explanations.
             }
         });
     }
-    // STEP 3: Parse selected files with AST to produce detailed trees
     parseFileWithAST(filePath) {
-        console.log(`🔧 STEP 3: Parsing ${filePath} with AST...`);
         const file = this.projectFiles.get(filePath);
         if (!file) {
-            console.error(`File not found: ${filePath}`);
             return [];
         }
         try {
@@ -448,13 +412,10 @@ Return ONLY the JSON, no explanations.
                     const endLine = ((_b = node.loc) === null || _b === void 0 ? void 0 : _b.end.line) || 1;
                     const startColumn = ((_c = node.loc) === null || _c === void 0 ? void 0 : _c.start.column) || 0;
                     const endColumn = ((_d = node.loc) === null || _d === void 0 ? void 0 : _d.end.column) || 0;
-                    // Extract exact code snippet
                     const codeSnippet = lines.slice(startLine - 1, endLine).join('\n');
-                    // Get fuller context (3 lines before and after)
                     const contextStart = Math.max(0, startLine - 4);
                     const contextEnd = Math.min(lines.length, endLine + 3);
                     const fullContext = lines.slice(contextStart, contextEnd).join('\n');
-                    // Get attributes
                     const attributes = [];
                     if (node.openingElement.attributes) {
                         node.openingElement.attributes.forEach((attr) => {
@@ -480,7 +441,6 @@ Return ONLY the JSON, no explanations.
                     });
                 }
             });
-            console.log(`📊 Found ${nodes.length} AST nodes in ${filePath}`);
             return nodes;
         }
         catch (error) {
@@ -488,10 +448,8 @@ Return ONLY the JSON, no explanations.
             return [];
         }
     }
-    // STEP 4: Claude pinpoints exact AST nodes needing modification
     identifyTargetNodes(prompt, filePath, nodes) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🎯 STEP 4: Claude identifying target nodes in ${filePath}...`);
             const nodesPreview = nodes.map(node => `**${node.id}:** <${node.tagName}> "${node.textContent}" (lines ${node.startLine}-${node.endLine})${node.isButton ? ' [BUTTON]' : ''}${node.hasSigninText ? ' [SIGNIN]' : ''}`).join('\n');
             const claudePrompt = `
 **User Request:** "${prompt}"
@@ -528,7 +486,6 @@ If no nodes need changes, return: []
                     if (match) {
                         const nodeIds = JSON.parse(`[${match[1]}]`);
                         const targetNodes = nodes.filter(node => nodeIds.includes(node.id));
-                        console.log(`🎯 Claude selected ${targetNodes.length} target nodes: ${nodeIds.join(', ')}`);
                         return targetNodes;
                     }
                 }
@@ -540,10 +497,8 @@ If no nodes need changes, return: []
             }
         });
     }
-    // STEP 5-6: Extract code snippets and send to Claude for modification
     modifyCodeSnippets(prompt, targetNodes) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`✏️ STEP 6: Claude modifying ${targetNodes.length} code snippets...`);
             const snippetsInfo = targetNodes.map(node => `**${node.id}:** (lines ${node.startLine}-${node.endLine})
 \`\`\`jsx
 ${node.codeSnippet}
@@ -591,8 +546,6 @@ Return ONLY the JSON, nothing else.
                 const firstBlock = response.content[0];
                 if ((firstBlock === null || firstBlock === void 0 ? void 0 : firstBlock.type) === 'text') {
                     const text = firstBlock.text;
-                    console.log(`🔍 Raw response: ${text.substring(0, 200)}...`);
-                    // Try multiple JSON extraction patterns
                     let jsonMatch = text.match(/```json\n([\s\S]*?)```/);
                     if (!jsonMatch) {
                         jsonMatch = text.match(/```\n([\s\S]*?)```/);
@@ -603,26 +556,18 @@ Return ONLY the JSON, nothing else.
                     if (jsonMatch) {
                         try {
                             const jsonText = jsonMatch[1] || jsonMatch[0];
-                            console.log(`🔍 Extracted JSON: ${jsonText}`);
                             const modifications = JSON.parse(jsonText);
                             const modMap = new Map();
                             for (const [nodeId, modifiedCode] of Object.entries(modifications)) {
                                 if (typeof modifiedCode === 'string' && modifiedCode.trim()) {
                                     modMap.set(nodeId, modifiedCode);
-                                    console.log(`✅ Added modification for ${nodeId}: ${modifiedCode.substring(0, 50)}...`);
                                 }
                             }
-                            console.log(`✅ Successfully parsed ${modMap.size} code modifications`);
                             return modMap;
                         }
                         catch (parseError) {
                             console.error('JSON parsing failed:', parseError);
-                            console.log('Raw JSON text:', jsonMatch[1] || jsonMatch[0]);
                         }
-                    }
-                    else {
-                        console.error('No JSON found in response');
-                        console.log('Full response:', text);
                     }
                 }
                 return new Map();
@@ -633,18 +578,14 @@ Return ONLY the JSON, nothing else.
             }
         });
     }
-    // STEP 7-8: Replace exact code ranges with modified snippets
     applyModifications(filePath, targetNodes, modifications) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log(`🔄 STEP 8: Applying modifications to ${filePath}...`);
             const file = this.projectFiles.get(filePath);
             if (!file) {
-                console.error(`File not found: ${filePath}`);
                 return false;
             }
             let modifiedContent = file.content;
             const lines = modifiedContent.split('\n');
-            // Sort nodes by line number (descending) to avoid index shifts
             const sortedNodes = targetNodes
                 .filter(node => modifications.has(node.id))
                 .sort((a, b) => b.startLine - a.startLine);
@@ -655,13 +596,11 @@ Return ONLY the JSON, nothing else.
                     const endIndex = node.endLine - 1;
                     const newLines = modifiedCode.split('\n');
                     lines.splice(startIndex, endIndex - startIndex + 1, ...newLines);
-                    console.log(`  ✅ Replaced ${node.id} (lines ${node.startLine}-${node.endLine})`);
                 }
             }
             modifiedContent = lines.join('\n');
             try {
                 yield fs_1.promises.writeFile(file.path, modifiedContent, 'utf8');
-                console.log(`💾 Saved modified file: ${filePath}`);
                 return true;
             }
             catch (error) {
@@ -670,24 +609,17 @@ Return ONLY the JSON, nothing else.
             }
         });
     }
-    // Main workflow following your exact 8-step process
-    processModification(prompt) {
+    processModification(prompt, conversationContext) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                console.log(`🚀 Starting 8-step modification workflow for: "${prompt}"`);
-                // STEP 1: Build project file tree + metadata
                 yield this.buildProjectTree();
                 if (this.projectFiles.size === 0) {
                     return { success: false, error: 'No React files found in project' };
                 }
-                // STEP 2: Claude analyzes project tree to determine relevant files + scope
-                let fileAnalysis = yield this.identifyRelevantFiles(prompt);
-                // FALLBACK: If no files identified, search all files one by one, then ask Claude for scope
+                let fileAnalysis = yield this.identifyRelevantFiles(prompt, conversationContext);
                 if (fileAnalysis.files.length === 0) {
-                    console.log(`⚠️ No files identified by Claude, triggering fallback search...`);
                     const fallbackFiles = yield this.fallbackFileSearch(prompt);
                     if (fallbackFiles.length > 0) {
-                        // Let Claude determine scope for fallback files
                         const scope = yield this.determineScopeForFallbackFiles(prompt, fallbackFiles);
                         fileAnalysis = { files: fallbackFiles, scope };
                     }
@@ -699,10 +631,7 @@ Return ONLY the JSON, nothing else.
                     return { success: false, error: 'No relevant files found even after fallback search' };
                 }
                 const { files: relevantFiles, scope } = fileAnalysis;
-                console.log(`📋 Processing ${relevantFiles.length} files with ${scope} approach`);
-                // Handle based on scope
                 if (scope === 'FULL_FILE') {
-                    console.log(`🔄 Using FULL_FILE approach for comprehensive changes...`);
                     let successCount = 0;
                     for (const filePath of relevantFiles) {
                         const success = yield this.handleFullFileModification(prompt, filePath);
@@ -714,6 +643,7 @@ Return ONLY the JSON, nothing else.
                             success: true,
                             selectedFiles: relevantFiles,
                             approach: 'FULL_FILE',
+                            reasoning: fileAnalysis.reasoning,
                             modifiedRanges: [{
                                     file: relevantFiles.join(', '),
                                     range: {
@@ -732,34 +662,22 @@ Return ONLY the JSON, nothing else.
                     }
                 }
                 else {
-                    // TARGETED_NODES approach - continue with AST workflow
-                    console.log(`🎯 Using TARGETED_NODES approach for precise changes...`);
                     const modifiedRanges = [];
-                    // Process each relevant file with AST
                     for (const filePath of relevantFiles) {
-                        console.log(`\n🔄 Processing file: ${filePath}`);
-                        // STEP 3: Parse file with AST to produce detailed trees
                         const astNodes = this.parseFileWithAST(filePath);
                         if (astNodes.length === 0) {
-                            console.log(`⚠️ No AST nodes found in ${filePath}`);
                             continue;
                         }
-                        // STEP 4: Claude pinpoints exact AST nodes needing modification
                         const targetNodes = yield this.identifyTargetNodes(prompt, filePath, astNodes);
                         if (targetNodes.length === 0) {
-                            console.log(`⚠️ No target nodes identified in ${filePath}`);
                             continue;
                         }
-                        // STEP 5-6: Extract code snippets and send to Claude for modification
                         const modifications = yield this.modifyCodeSnippets(prompt, targetNodes);
                         if (modifications.size === 0) {
-                            console.log(`⚠️ No modifications received for ${filePath}`);
                             continue;
                         }
-                        // STEP 7-8: Replace exact code ranges with modified snippets
                         const success = yield this.applyModifications(filePath, targetNodes, modifications);
                         if (success) {
-                            // Record the modifications
                             for (const node of targetNodes) {
                                 if (modifications.has(node.id)) {
                                     modifiedRanges.push({
@@ -778,12 +696,11 @@ Return ONLY the JSON, nothing else.
                         }
                     }
                     if (modifiedRanges.length > 0) {
-                        console.log(`\n🎉 Successfully completed 8-step workflow!`);
-                        console.log(`📊 Modified ${modifiedRanges.length} code ranges across ${relevantFiles.length} files`);
                         return {
                             success: true,
                             selectedFiles: relevantFiles,
                             approach: 'TARGETED_NODES',
+                            reasoning: fileAnalysis.reasoning,
                             modifiedRanges
                         };
                     }

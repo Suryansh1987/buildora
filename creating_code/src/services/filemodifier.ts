@@ -42,10 +42,11 @@ interface CodeRange {
   originalCode: string;
 }
 
-interface ModificationResult {
+export interface ModificationResult {
   success: boolean;
   selectedFiles?: string[];
   approach?: 'FULL_FILE' | 'TARGETED_NODES';
+  reasoning?: string;
   modifiedRanges?: Array<{
     file: string;
     range: CodeRange;
@@ -340,19 +341,27 @@ ${file.content}
     return summary;
   }
 
-  private async identifyRelevantFiles(prompt: string): Promise<{ files: string[]; scope: 'FULL_FILE' | 'TARGETED_NODES' }> {
+  private async identifyRelevantFiles(prompt: string, conversationContext?: string): Promise<{ 
+    files: string[]; 
+    scope: 'FULL_FILE' | 'TARGETED_NODES';
+    reasoning?: string;
+  }> {
     const projectSummary = this.buildProjectSummary();
     
     const claudePrompt = `
 You are analyzing a React project to determine which files need modification AND the scope of changes.
 
-**User Request:** "${prompt}"
+${conversationContext ? `**Conversation Context:**
+${conversationContext}
+
+` : ''}**Current User Request:** "${prompt}"
 
 ${projectSummary}
 
 **Your Task:** 
 1. Determine which file(s) are relevant for this modification request
 2. **CRITICALLY IMPORTANT**: Determine the modification scope based on the request
+3. Consider previous conversation context when making decisions
 
 **Scope Guidelines (VERY IMPORTANT):**
 - **FULL_FILE**: Use when request involves:
@@ -362,6 +371,7 @@ ${projectSummary}
   * Adding responsive design, mobile layouts
   * Structural changes affecting entire components
   * Any request mentioning "entire", "all", "complete", "comprehensive"
+  * Building on previous comprehensive changes mentioned in context
 
 - **TARGETED_NODES**: Use when request involves:
   * Specific button colors (e.g., "make signin button red")
@@ -369,13 +379,22 @@ ${projectSummary}
   * Single element modifications
   * Small styling tweaks to specific elements
   * Adding/removing specific attributes
+  * Minor adjustments to previously modified elements
 
 **File Selection Guidelines:**
 - For signin/login requests: Look for files with signin content
 - For button styling: Look for files with buttons  
 - For layout/theme changes: Focus on main app files
+- Consider files mentioned in conversation context as candidates
 - You can select multiple files if the change affects multiple components
 - NEVER select files from components/ui/ folder (these are UI library components)
+- If context shows recent modifications to specific files, consider if current request relates to them
+
+**Context Awareness:**
+- If previous messages mention specific files being modified, consider their relevance
+- If user is building on previous changes (e.g., "also make the header darker" after dark mode), maintain consistency
+- If previous attempts failed on certain files, consider alternative files
+- Learn from successful modification patterns in the conversation
 
 **Examples:**
 - "make signin button red" → TARGETED_NODES
@@ -383,24 +402,27 @@ ${projectSummary}
 - "change layout to modern design" → FULL_FILE
 - "make header responsive" → FULL_FILE
 - "change text color of welcome message" → TARGETED_NODES
+- "also make the buttons bigger" (after button color changes) → TARGETED_NODES
+- "make the whole app dark" (following previous dark mode work) → FULL_FILE
 
 **Response Format:** Return ONLY this JSON:
 \`\`\`json
 {
   "files": ["src/App.tsx", "src/components/LoginForm.tsx"],
-  "scope": "FULL_FILE"
+  "scope": "FULL_FILE",
+  "reasoning": "Brief explanation of file selection and scope decision based on request and context"
 }
 \`\`\`
 
-**CRITICAL**: Pay special attention to scope determination - this controls the entire workflow!
+**CRITICAL**: Pay special attention to scope determination and conversation context - this controls the entire workflow!
 
-Return ONLY the JSON, no explanations.
+Return ONLY the JSON, no explanations outside the reasoning field.
     `.trim();
 
     try {
       const response = await this.anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
-        max_tokens: 400,
+        max_tokens: 500,
         temperature: 0,
         messages: [{ role: 'user', content: claudePrompt }],
       });
@@ -412,7 +434,11 @@ Return ONLY the JSON, no explanations.
         
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[1]);
-          return result;
+          return {
+            files: result.files,
+            scope: result.scope,
+            reasoning: result.reasoning
+          };
         }
       }
       
@@ -678,7 +704,7 @@ Return ONLY the JSON, nothing else.
     }
   }
 
-  async processModification(prompt: string): Promise<ModificationResult> {
+  async processModification(prompt: string, conversationContext?: string): Promise<ModificationResult> {
     try {
       await this.buildProjectTree();
       
@@ -686,7 +712,7 @@ Return ONLY the JSON, nothing else.
         return { success: false, error: 'No React files found in project' };
       }
 
-      let fileAnalysis = await this.identifyRelevantFiles(prompt);
+      let fileAnalysis = await this.identifyRelevantFiles(prompt, conversationContext);
       
       if (fileAnalysis.files.length === 0) {
         const fallbackFiles = await this.fallbackFileSearch(prompt);
@@ -717,6 +743,7 @@ Return ONLY the JSON, nothing else.
             success: true,
             selectedFiles: relevantFiles,
             approach: 'FULL_FILE',
+            reasoning: fileAnalysis.reasoning,
             modifiedRanges: [{
               file: relevantFiles.join(', '),
               range: {
@@ -784,6 +811,7 @@ Return ONLY the JSON, nothing else.
             success: true,
             selectedFiles: relevantFiles,
             approach: 'TARGETED_NODES',
+            reasoning: fileAnalysis.reasoning,
             modifiedRanges
           };
         } else {

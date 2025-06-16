@@ -55,11 +55,11 @@ export function TodoForm({ todo, onSubmit, onCancel, isEditing = false }: TodoFo
   };
 
   return (
-    <Card className="mb-6 bg-white border-black">
+    <Card className="mb-6 bg-white border-gray-300">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-xl text-black">
-            {isEditing ? 'Edit Todo' : 'Add New Todo'}
+<CardTitle className="text-xl text-black">
+            {isEditing ? 'Edit Master Blaster' : 'Add New Master Blaster'}
           </CardTitle>
           {isEditing && (
             <Button variant="ghost" size="sm" onClick={onCancel} className="text-black hover:bg-gray-200">
@@ -79,16 +79,16 @@ export function TodoForm({ todo, onSubmit, onCancel, isEditing = false }: TodoFo
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Enter todo title"
                 required
-                className="border-black text-black placeholder-gray-500"
+                className="border-gray-300 text-black placeholder-gray-400"
               />
             </div>
             <div>
               <Label htmlFor="category" className="text-black">Category</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="border-black text-black">
+                <SelectTrigger className="border-gray-300 text-black">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-white border-black">
+                <SelectContent className="bg-white border-gray-300">
                   <SelectItem value="Personal">Personal</SelectItem>
                   <SelectItem value="Work">Work</SelectItem>
                   <SelectItem value="Health">Health</SelectItem>
@@ -107,7 +107,7 @@ export function TodoForm({ todo, onSubmit, onCancel, isEditing = false }: TodoFo
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Enter todo description (optional)"
               rows={3}
-              className="border-black text-black placeholder-gray-500"
+              className="border-gray-300 text-black placeholder-gray-400"
             />
           </div>
           
@@ -115,10 +115,10 @@ export function TodoForm({ todo, onSubmit, onCancel, isEditing = false }: TodoFo
             <div>
               <Label htmlFor="priority" className="text-black">Priority</Label>
               <Select value={priority} onValueChange={(value: 'low' | 'medium' | 'high') => setPriority(value)}>
-                <SelectTrigger className="border-black text-black">
+                <SelectTrigger className="border-gray-300 text-black">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-white border-black">
+                <SelectContent className="bg-white border-gray-300">
                   <SelectItem value="low">Low</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="high">High</SelectItem>
@@ -132,21 +132,21 @@ export function TodoForm({ todo, onSubmit, onCancel, isEditing = false }: TodoFo
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="border-black text-black"
+                className="border-gray-300 text-black"
               />
             </div>
           </div>
           
           <div className="flex justify-end space-x-2">
             {isEditing && (
-              <Button type="button" variant="outline" onClick={onCancel} className="border-black text-black hover:bg-gray-200">
+              <Button type="button" variant="outline" onClick={onCancel} className="border-gray-300 text-black hover:bg-gray-200">
                 Cancel
               </Button>
             )}
-            <Button type="submit" className="bg-black text-white hover:bg-gray-800">
-              <Plus className="h-4 w-4 mr-2" />
-              {isEditing ? 'Update Todo' : 'Add Todo'}
-            </Button>
+<Button type="submit" className="bg-black text-white hover:bg-gray-800">
+  <img src="/path/to/your/image.png" alt="Add Todo" className="h-4 w-4 mr-2" />
+  {isEditing ? 'Update Todo' : 'Add Todo'}
+</Button>
           </div>
         </form>
       </CardContent>
