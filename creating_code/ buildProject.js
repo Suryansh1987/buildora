@@ -1,26 +1,33 @@
-import { exec } from "child_process";
-import path from "path";
-async function buildProject(projectId) {
-  const projectPath = path.join(__dirname, "../generated-sites" , projectId);
-  const outputPath = path.join(__dirname, "../static-folder" , projectId,);
+// backend/buildRunner.js
+const { exec } = require("child_process");
+const path = require("path");
 
-  const cmd = `
-      docker build -t ${projectId}-builder -f Dockerfile.build-react ${projectPath} &&
-      docker create --name ${projectId}-container ${projectId}-builder &&
-      mkdir -p ${outputPath} &&
-      docker cp ${projectId}-container:/app/build ${outputPath} &&
-      docker rm ${projectId}-container &&
-      docker rmi ${projectId}-builder
-    `;
+const zipUrl = "https://zewahrnmtqehbaduaewy.supabase.co/storage/v1/object/public/zipprojects/archives/proj123.zip"; // <-- inject this dynamically if needed
 
-  exec(cmd, (err, stdout, stderr) => {
+// Run docker build
+exec(
+  `docker build --build-arg ZIP_URL="${zipUrl}" -t react-builder .`,
+  { cwd: path.resolve(__dirname) }, // run from /backend
+  (err, stdout, stderr) => {
     if (err) {
-      console.error("❌ Build failed:\n", stderr);
-    } else {
-      console.log("✅ Build succeeded:\n", stdout);
-      console.log(`📁 Built output available at: dist/${projectId}/build`);
+      console.error("❌ Build failed:", stderr);
+      return;
     }
-  });
-}
 
-buildProject("project123"); // Replace with actual project ID
+    console.log("✅ Build completed. Output:");
+    console.log(stdout);
+
+    // Run the container and mount output folder
+    exec(
+      `docker run --rm -v ${path.resolve(__dirname, "output")}:/app/dist react-builder`,
+      (err, stdout, stderr) => {
+        if (err) {
+          console.error("❌ Run failed:", stderr);
+          return;
+        }
+
+        console.log("✅ Build output is in /backend/output");
+      }
+    );
+  }
+);

@@ -8,7 +8,7 @@ function App() {
   return (
     <>
       <Index />
-      <ChatPage />
+      {/* <ChatPage /> */}
     </>
   );
 }
