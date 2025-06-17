@@ -68,15 +68,13 @@ class DrizzleMessageHistoryDB {
     // Maintain only 5 recent messages, summarize older ones
     maintainRecentMessages() {
         return __awaiter(this, void 0, void 0, function* () {
-            // Get all messages ordered by creation time
             const allMessages = yield this.db.select().from(schema_1.messages).orderBy((0, drizzle_orm_1.desc)(schema_1.messages.createdAt));
-            // If we have more than 5 messages, summarize the older ones
             if (allMessages.length > 5) {
                 const recentMessages = allMessages.slice(0, 5);
                 const oldMessages = allMessages.slice(5);
-                // Create summary from old messages
                 if (oldMessages.length > 0) {
-                    yield this.createSummary(oldMessages);
+                    // Update the single growing summary instead of creating new ones
+                    yield this.updateGrowingSummary(oldMessages);
                 }
                 // Delete old messages (keep only recent 5)
                 const oldMessageIds = oldMessages.map(m => m.id);
@@ -86,108 +84,150 @@ class DrizzleMessageHistoryDB {
             }
         });
     }
-    // Create a summary from old messages using Claude
-    createSummary(oldMessages) {
+    fixConversationStats() {
         return __awaiter(this, void 0, void 0, function* () {
-            const { summary, keyTopics } = yield this.generateSummary(oldMessages);
-            const newSummary = {
-                summary,
-                messageCount: oldMessages.length,
-                startTime: oldMessages[oldMessages.length - 1].createdAt, // Oldest first
-                endTime: oldMessages[0].createdAt, // Newest first
-                keyTopics,
-                createdAt: new Date()
-            };
-            yield this.db.insert(schema_1.messageSummaries).values(newSummary);
-            // Update summary count in stats using SQL increment
-            yield this.db.update(schema_1.conversationStats)
-                .set({
-                summaryCount: (0, drizzle_orm_1.sql) `${schema_1.conversationStats.summaryCount} + 1`,
-                updatedAt: new Date()
-            })
-                .where((0, drizzle_orm_1.eq)(schema_1.conversationStats.id, 1));
+            try {
+                // Count actual messages
+                const allMessages = yield this.db.select().from(schema_1.messages);
+                const messageCount = allMessages.length;
+                // Count summaries
+                const summaries = yield this.db.select().from(schema_1.messageSummaries);
+                const summaryCount = summaries.length;
+                // Get summary message count
+                const latestSummary = summaries[0];
+                const summarizedMessageCount = (latestSummary === null || latestSummary === void 0 ? void 0 : latestSummary.messageCount) || 0;
+                // Calculate total messages
+                const totalMessages = messageCount + summarizedMessageCount;
+                // Update stats
+                yield this.db.update(schema_1.conversationStats)
+                    .set({
+                    totalMessageCount: totalMessages,
+                    summaryCount: summaryCount > 0 ? 1 : 0, // Since we only keep one summary
+                    lastMessageAt: allMessages.length > 0 ? allMessages[allMessages.length - 1].createdAt : null,
+                    updatedAt: new Date()
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.conversationStats.id, 1));
+                console.log(`✅ Fixed stats: ${totalMessages} total messages, ${summaryCount} summaries`);
+            }
+            catch (error) {
+                console.error('Error fixing conversation stats:', error);
+            }
         });
     }
-    // Generate summary using Claude
-    generateSummary(oldMessages) {
+    updateGrowingSummary(newMessages) {
         return __awaiter(this, void 0, void 0, function* () {
-            const messagesText = oldMessages.reverse().map(msg => {
+            // Get the existing summary
+            const existingSummaries = yield this.db.select().from(schema_1.messageSummaries).orderBy((0, drizzle_orm_1.desc)(schema_1.messageSummaries.createdAt)).limit(1);
+            const existingSummary = existingSummaries[0];
+            // Generate new content to add to summary
+            const { summary: newContent } = yield this.generateSummaryUpdate(newMessages, existingSummary === null || existingSummary === void 0 ? void 0 : existingSummary.summary);
+            if (existingSummary) {
+                // Update existing summary by appending new content
+                yield this.db.update(schema_1.messageSummaries)
+                    .set({
+                    summary: newContent,
+                    messageCount: existingSummary.messageCount + newMessages.length,
+                    endTime: newMessages[0].createdAt, // Most recent time
+                    //@ts-ignore
+                    updatedAt: new Date()
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.messageSummaries.id, existingSummary.id));
+            }
+            else {
+                // Create first summary
+                const newSummary = {
+                    summary: newContent,
+                    messageCount: newMessages.length,
+                    startTime: newMessages[newMessages.length - 1].createdAt, // Oldest
+                    endTime: newMessages[0].createdAt, // Newest
+                    keyTopics: ['react', 'file-modification'],
+                    createdAt: new Date()
+                };
+                yield this.db.insert(schema_1.messageSummaries).values(newSummary);
+            }
+            // Update summary count in stats
+            if (!existingSummary) {
+                yield this.db.update(schema_1.conversationStats)
+                    .set({
+                    summaryCount: 1,
+                    updatedAt: new Date()
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.conversationStats.id, 1));
+            }
+        });
+    }
+    // Generate updated summary using Claude
+    generateSummaryUpdate(newMessages, existingSummary) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const newMessagesText = newMessages.reverse().map(msg => {
                 let text = `[${msg.messageType.toUpperCase()}]: ${msg.content}`;
                 if (msg.fileModifications && msg.fileModifications.length > 0) {
                     text += ` (Modified: ${msg.fileModifications.join(', ')})`;
                 }
                 return text;
             }).join('\n\n');
-            const claudePrompt = `
-Summarize this conversation about React file modifications. Focus on:
-1. What changes were requested
-2. Which files were modified  
-3. What approaches were used
-4. Any issues or successes
+            const claudePrompt = existingSummary
+                ? `Update this existing conversation summary by incorporating the new messages:
 
-**Messages:**
-${messagesText}
+**EXISTING SUMMARY:**
+${existingSummary}
 
-**Response Format:**
-{
-  "summary": "Brief summary of the conversation",
-  "keyTopics": ["topic1", "topic2", "topic3"]
-}
+**NEW MESSAGES TO ADD:**
+${newMessagesText}
 
-Return only the JSON.
-    `.trim();
+**Instructions:**
+- Merge the new information into the existing summary
+- Keep the summary concise but comprehensive
+- Focus on: what was built/modified, key changes made, approaches used, files affected
+- Return only the updated summary text, no JSON`
+                : `Create a concise summary of this React development conversation:
+
+**MESSAGES:**
+${newMessagesText}
+
+**Instructions:**
+- Focus on: what was built/modified, key changes made, approaches used, files affected
+- Keep it concise but informative
+- Return only the summary text, no JSON`;
             try {
                 const response = yield this.anthropic.messages.create({
                     model: 'claude-3-5-sonnet-20240620',
-                    max_tokens: 500,
+                    max_tokens: 800,
                     temperature: 0,
                     messages: [{ role: 'user', content: claudePrompt }],
                 });
                 const firstBlock = response.content[0];
                 if ((firstBlock === null || firstBlock === void 0 ? void 0 : firstBlock.type) === 'text') {
-                    const text = firstBlock.text;
-                    const jsonMatch = text.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        const result = JSON.parse(jsonMatch[0]);
-                        return {
-                            summary: result.summary,
-                            keyTopics: result.keyTopics || []
-                        };
-                    }
+                    return { summary: firstBlock.text.trim() };
                 }
             }
             catch (error) {
-                console.error('Error generating summary:', error);
+                console.error('Error generating summary update:', error);
             }
-            // Fallback summary
-            return {
-                summary: `React modification conversation (${oldMessages.length} messages)`,
-                keyTopics: ['react', 'file-modification']
-            };
+            // Fallback
+            const fallbackSummary = existingSummary
+                ? `${existingSummary}\n\nAdditional changes: React modifications (${newMessages.length} more messages)`
+                : `React development conversation (${newMessages.length} messages)`;
+            return { summary: fallbackSummary };
         });
     }
     // Get conversation context for file modification prompts
     getConversationContext() {
         return __awaiter(this, void 0, void 0, function* () {
-            // Get summaries
-            const summaries = yield this.db.select().from(schema_1.messageSummaries).orderBy((0, drizzle_orm_1.desc)(schema_1.messageSummaries.createdAt));
+            // Get the single summary
+            const summaries = yield this.db.select().from(schema_1.messageSummaries).orderBy((0, drizzle_orm_1.desc)(schema_1.messageSummaries.createdAt)).limit(1);
             // Get recent messages
             const recentMessages = yield this.db.select().from(schema_1.messages).orderBy((0, drizzle_orm_1.desc)(schema_1.messages.createdAt));
             let context = '';
-            // Add summaries
+            // Add the single growing summary
             if (summaries.length > 0) {
-                context += '**Previous Conversation Summary:**\n';
-                summaries.forEach((summary, index) => {
-                    context += `${index + 1}. ${summary.summary} (${summary.messageCount} messages)\n`;
-                    if (summary.keyTopics && summary.keyTopics.length > 0) {
-                        context += `   Topics: ${summary.keyTopics.join(', ')}\n`;
-                    }
-                });
-                context += '\n';
+                const summary = summaries[0];
+                context += `**CONVERSATION SUMMARY (${summary.messageCount} previous messages):**\n`;
+                context += `${summary.summary}\n\n`;
             }
             // Add recent messages
             if (recentMessages.length > 0) {
-                context += '**Recent Messages:**\n';
+                context += '**RECENT MESSAGES:**\n';
                 recentMessages.reverse().forEach((msg, index) => {
                     context += `${index + 1}. [${msg.messageType.toUpperCase()}]: ${msg.content}\n`;
                     if (msg.fileModifications && msg.fileModifications.length > 0) {
@@ -211,6 +251,20 @@ Return only the JSON.
                 summaryCount: currentStats.summaryCount || 0,
                 totalMessages: currentStats.totalMessageCount || 0
             };
+        });
+    }
+    // Get current summary for display - MOVED TO CORRECT CLASS
+    getCurrentSummary() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const summaries = yield this.db.select().from(schema_1.messageSummaries).orderBy((0, drizzle_orm_1.desc)(schema_1.messageSummaries.createdAt)).limit(1);
+            if (summaries.length > 0) {
+                const summary = summaries[0];
+                return {
+                    summary: summary.summary,
+                    messageCount: summary.messageCount
+                };
+            }
+            return null;
         });
     }
     // Get conversation stats

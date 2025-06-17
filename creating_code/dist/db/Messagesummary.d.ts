@@ -12,14 +12,19 @@ export declare class DrizzleMessageHistoryDB {
         modificationSuccess?: boolean;
     }): Promise<string>;
     private maintainRecentMessages;
-    private createSummary;
-    private generateSummary;
+    fixConversationStats(): Promise<void>;
+    private updateGrowingSummary;
+    private generateSummaryUpdate;
     getConversationContext(): Promise<string>;
     getRecentConversation(): Promise<{
         messages: Message[];
         summaryCount: number;
         totalMessages: number;
     }>;
+    getCurrentSummary(): Promise<{
+        summary: string;
+        messageCount: number;
+    } | null>;
     getConversationStats(): Promise<ConversationStats | null>;
     getAllSummaries(): Promise<MessageSummary[]>;
     clearAllData(): Promise<void>;

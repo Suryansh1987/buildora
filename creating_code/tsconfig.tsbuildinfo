@@ -1,1 +1,1 @@
-{"root":["./src/index.ts","./src/db/messagesummary.ts","./src/db/schema.ts","./src/defaults/classes.ts","./src/defaults/promt.ts","./src/services/filemodifier.ts"],"version":"5.8.3"}
+{"root":["./src/index.ts","./src/db/messagesummary.ts","./src/db/schema.ts","./src/defaults/classes.ts","./src/defaults/promt.ts","./src/services/filemodifier.ts","./src/services/filetree.ts"],"version":"5.8.3"}

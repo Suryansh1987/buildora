@@ -6,12 +6,16 @@ import { parseFrontendCode } from "../utils/newParserWithst";
 import { MyContext } from "../context/FrontendStructureContext";
 import ChatPage from "./ChatPage";
 import { motion, AnimatePresence } from "motion/react";
+
 const Index = () => {
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
+  //@ts-ignore
   const { value, setValue } = useContext(MyContext);
+
+  // Use the same API_BASE_URL pattern as ChatPage
+  const API_BASE_URL = '/api'; // Use Vite proxy instead of direct localhost:3000
 
   const handleSubmit = async () => {
     setIsLoading(true);
@@ -19,7 +23,7 @@ const Index = () => {
 
     try {
       // const response = await axios.post(
-      //   "http://localhost:3000/generatebackend",
+      //   `${API_BASE_URL}/generatebackend`,
       //   {
       //     prompt,
       //   }
@@ -29,7 +33,7 @@ const Index = () => {
       // const data = parseApiData(response.data);
       // console.log(data, "parsed");
       // const codeFiles = data.codeFiles;
-      // await axios.post("http://localhost:3000/write-files", {
+      // await axios.post(`${API_BASE_URL}/write-files`, {
       //   baseDir:
       //     "/Users/manmindersingh/Desktop/code /ai-webisite-builder/backend-base-templete",
       //   files: codeFiles,
@@ -45,8 +49,9 @@ const Index = () => {
 
       console.log("started ");
 
+      // Updated to use proxy
       const frontendres = await axios.post(
-        "http://localhost:3000/generateFrontend",
+        `${API_BASE_URL}/generateFrontend`,
         {
           prompt,
         }
@@ -68,10 +73,14 @@ const Index = () => {
       //     frontendres.data.content[0].text
       //   );
       console.log("now starting to insert files ");
-      await axios.post("http://localhost:3000/write-files", {
+      
+      // Updated to use proxy
+      await axios.post(`${API_BASE_URL}/write-files`, {
         files: parsedFrontend.codeFiles,
       });
-      const res = await axios.get("http://localhost:3000/zipFolder");
+      
+      // Updated to use proxy
+      const res = await axios.get(`${API_BASE_URL}/zipFolder`);
       console.log(res.data);
       setIsLoading(false);
     } catch (error) {

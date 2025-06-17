@@ -1,39 +1,45 @@
-export interface Pizza {
+export interface Course {
   id: string;
-  name: string;
+  title: string;
   description: string;
+  instructor: string;
   price: number;
-  image: string;
-  category: 'vegetarian' | 'non-vegetarian' | 'specialty';
-  size: 'small' | 'medium' | 'large';
-  ingredients: string[];
+  duration: string;
+  level: string;
+  category: string;
+  thumbnail: string;
+  rating: number;
+  enrolled: number;
+  featured: boolean;
 }
 
-export interface Category {
+export interface Instructor {
   id: string;
   name: string;
-  description: string;
-  image: string;
+  bio: string;
+  avatar: string;
+  expertise: string[];
+  rating: number;
+  students: number;
+  courses: number;
 }
 
-export interface Testimonial {
+export interface Review {
   id: string;
-  name: string;
+  courseId: string;
+  userName: string;
   rating: number;
   comment: string;
-  avatar: string;
+  date: string;
 }
 
-export interface CartItem {
-  pizza: Pizza;
-  quantity: number;
-  selectedSize: 'small' | 'medium' | 'large';
+export interface CategoryStats {
+  name: string;
+  count: number;
+  icon: string;
 }
 
-export interface OrderItem {
-  id: string;
-  pizzaId: string;
-  quantity: number;
-  size: 'small' | 'medium' | 'large';
+export interface EnrollmentDetails {
+  courseId: string;
   price: number;
 }

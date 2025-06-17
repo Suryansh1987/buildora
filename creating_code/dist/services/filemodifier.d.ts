@@ -22,7 +22,10 @@ export declare class IntelligentFileModifier {
     private anthropic;
     private reactBasePath;
     private projectFiles;
+    private streamCallback?;
     constructor(anthropic: Anthropic, reactBasePath: string);
+    setStreamCallback(callback: (message: string) => void): void;
+    private streamUpdate;
     private buildProjectTree;
     private analyzeFile;
     private escapeRegExp;

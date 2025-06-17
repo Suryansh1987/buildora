@@ -3,7 +3,7 @@ import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
 import { promises as fs } from 'fs';
 import { join, basename, dirname } from 'path';
-
+import { structure } from './filetree'; // or '../filetree' depending on location
 interface ProjectFile {
   name: string;
   path: string;
@@ -59,6 +59,7 @@ export class IntelligentFileModifier {
   private anthropic: Anthropic;
   private reactBasePath: string;
   private projectFiles: Map<string, ProjectFile>;
+  private streamCallback?: (message: string) => void;
 
   constructor(anthropic: Anthropic, reactBasePath: string) {
     this.anthropic = anthropic;
@@ -66,12 +67,27 @@ export class IntelligentFileModifier {
     this.projectFiles = new Map();
   }
 
+  // Set streaming callback
+  setStreamCallback(callback: (message: string) => void) {
+    this.streamCallback = callback;
+  }
+
+  private streamUpdate(message: string) {
+    if (this.streamCallback) {
+      this.streamCallback(message);
+    }
+  }
+
   private async buildProjectTree(): Promise<void> {
+    this.streamUpdate('Starting project analysis... Scanning the src directory for React components, TypeScript files, and project structure.');
+    
     const srcPath = join(this.reactBasePath, 'src');
     
     try {
       await fs.access(srcPath);
+      this.streamUpdate('Found src directory! Beginning deep scan of all React files (.js, .jsx, .ts, .tsx) while excluding node_modules and hidden directories.');
     } catch (error) {
+      this.streamUpdate('No src directory found. This might not be a React project or the structure is different than expected.');
       return;
     }
     
@@ -84,17 +100,21 @@ export class IntelligentFileModifier {
           const relPath = relativePath ? join(relativePath, entry.name) : entry.name;
           
           if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+            this.streamUpdate(`📁 Exploring directory: ${relPath}/ - scanning for React components and related files...`);
             await scanDir(fullPath, relPath);
           } else if (entry.isFile() && /\.(js|jsx|ts|tsx)$/.test(entry.name)) {
+            this.streamUpdate(`🔍 Analyzing file: ${relPath} - extracting component metadata, button detection, and code structure...`);
             await this.analyzeFile(fullPath, relPath);
           }
         }
       } catch (error) {
+        this.streamUpdate(`⚠️ Error scanning directory ${dir}: ${error}. Continuing with other directories...`);
         console.error(`Error scanning directory ${dir}:`, error);
       }
     };
 
     await scanDir(srcPath);
+    this.streamUpdate(`✅ Project scan complete! Found ${this.projectFiles.size} React files. Building comprehensive metadata including component names, button detection, signin patterns, and file relationships.`);
   }
 
   private async analyzeFile(filePath: string, relativePath: string): Promise<void> {
@@ -190,6 +210,8 @@ export class IntelligentFileModifier {
   }
 
   private async determineScopeForFallbackFiles(prompt: string, files: string[]): Promise<'FULL_FILE' | 'TARGETED_NODES'> {
+   
+   
     const claudePrompt = `
 **User Request:** "${prompt}"
 **Files Found:** ${files.join(', ')}
@@ -346,7 +368,11 @@ ${file.content}
     scope: 'FULL_FILE' | 'TARGETED_NODES';
     reasoning?: string;
   }> {
+    this.streamUpdate('🤖 Calling Claude AI to analyze your request and determine which files need modification. This involves understanding the intent, mapping to project structure, and deciding on modification scope...');
+    
     const projectSummary = this.buildProjectSummary();
+    
+    this.streamUpdate('📊 Built comprehensive project summary with file metadata. Now sending to Claude AI for intelligent file selection and scope determination...');
     
     const claudePrompt = `
 You are analyzing a React project to determine which files need modification AND the scope of changes.
@@ -357,7 +383,7 @@ ${conversationContext}
 ` : ''}**Current User Request:** "${prompt}"
 
 ${projectSummary}
-
+**File Structure:** "${structure}"
 **Your Task:** 
 1. Determine which file(s) are relevant for this modification request
 2. **CRITICALLY IMPORTANT**: Determine the modification scope based on the request
@@ -392,13 +418,14 @@ ${projectSummary}
 
 **Context Awareness:**
 - If previous messages mention specific files being modified, consider their relevance
+-Don't Import anything on your own
 - If user is building on previous changes (e.g., "also make the header darker" after dark mode), maintain consistency
 - If previous attempts failed on certain files, consider alternative files
 - Learn from successful modification patterns in the conversation
 
 **Examples:**
 - "make signin button red" → TARGETED_NODES
-- "add dark mode theme" → FULL_FILE
+- "add dark mode theme" or "mock data addition" → FULL_FILE
 - "change layout to modern design" → FULL_FILE
 - "make header responsive" → FULL_FILE
 - "change text color of welcome message" → TARGETED_NODES
@@ -420,6 +447,8 @@ Return ONLY the JSON, no explanations outside the reasoning field.
     `.trim();
 
     try {
+      this.streamUpdate('⚡ Claude AI is processing your request... Analyzing project structure, understanding intent, and making intelligent decisions about file modifications...');
+      
       const response = await this.anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
         max_tokens: 500,
@@ -434,6 +463,7 @@ Return ONLY the JSON, no explanations outside the reasoning field.
         
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[1]);
+          this.streamUpdate(`✅ Claude AI analysis complete! Selected ${result.files.length} files for ${result.scope} modification approach. Reasoning: ${result.reasoning}`);
           return {
             files: result.files,
             scope: result.scope,
@@ -442,20 +472,27 @@ Return ONLY the JSON, no explanations outside the reasoning field.
         }
       }
       
+      this.streamUpdate('⚠️ Claude AI response parsing failed. Falling back to default file selection strategy...');
       return { files: [], scope: 'TARGETED_NODES' };
     } catch (error) {
+      this.streamUpdate(`❌ Error during Claude AI file identification: ${error}. Attempting fallback search methods...`);
       console.error('Error in file identification:', error);
       return { files: [], scope: 'TARGETED_NODES' };
     }
   }
 
   private parseFileWithAST(filePath: string): ASTNode[] {
+    this.streamUpdate(`🔬 Parsing ${filePath} with Abstract Syntax Tree (AST) analysis. Converting React/TypeScript code into analyzable tree structure to identify precise modification targets...`);
+    
     const file = this.projectFiles.get(filePath);
     if (!file) {
+      this.streamUpdate(`⚠️ File ${filePath} not found in project files map. Skipping AST parsing...`);
       return [];
     }
 
     try {
+      this.streamUpdate(`📝 Using Babel parser with JSX and TypeScript plugins to create AST. This allows surgical precision in code modifications rather than string replacements...`);
+      
       const ast = parse(file.content, {
         sourceType: 'module',
         plugins: ['jsx', 'typescript'],
@@ -464,6 +501,8 @@ Return ONLY the JSON, no explanations outside the reasoning field.
       const nodes: ASTNode[] = [];
       let nodeId = 1;
       const lines = file.content.split('\n');
+
+      this.streamUpdate(`🔍 Traversing AST to find JSX elements (React components). Each element will be cataloged with its location, content, attributes, and modification potential...`);
 
       traverse(ast, {
         JSXElement(path: any) {
@@ -521,14 +560,19 @@ Return ONLY the JSON, no explanations outside the reasoning field.
         }
       });
 
+      this.streamUpdate(`✅ AST parsing complete for ${filePath}! Found ${nodes.length} JSX elements including ${nodes.filter(n => n.isButton).length} button elements and ${nodes.filter(n => n.hasSigninText).length} signin-related elements.`);
+      
       return nodes;
     } catch (error) {
+      this.streamUpdate(`❌ AST parsing failed for ${filePath}: ${error}. This file may have syntax errors or unsupported syntax. Skipping...`);
       console.error(`Error parsing ${filePath}:`, error);
       return [];
     }
   }
 
   private async identifyTargetNodes(prompt: string, filePath: string, nodes: ASTNode[]): Promise<ASTNode[]> {
+    this.streamUpdate(`🎯 Using Claude AI to identify specific target nodes in ${filePath}. Analyzing ${nodes.length} JSX elements to find exact components that need modification...`);
+    
     const nodesPreview = nodes.map(node => 
       `**${node.id}:** <${node.tagName}> "${node.textContent}" (lines ${node.startLine}-${node.endLine})${node.isButton ? ' [BUTTON]' : ''}${node.hasSigninText ? ' [SIGNIN]' : ''}`
     ).join('\n');
@@ -556,6 +600,8 @@ If no nodes need changes, return: []
     `.trim();
 
     try {
+      this.streamUpdate(`🤖 Claude AI is analyzing the AST nodes to determine which specific elements match your request. This ensures precise targeting without affecting unrelated code...`);
+      
       const response = await this.anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
         max_tokens: 200,
@@ -571,18 +617,23 @@ If no nodes need changes, return: []
         if (match) {
           const nodeIds = JSON.parse(`[${match[1]}]`);
           const targetNodes = nodes.filter(node => nodeIds.includes(node.id));
+          this.streamUpdate(`✅ Target identification complete! Selected ${targetNodes.length} specific nodes for modification: ${targetNodes.map(n => `${n.tagName}(${n.id})`).join(', ')}`);
           return targetNodes;
         }
       }
       
+      this.streamUpdate('⚠️ No specific target nodes identified by Claude AI. This might mean the request doesn\'t match any elements in this file.');
       return [];
     } catch (error) {
+      this.streamUpdate(`❌ Error during target node identification: ${error}. Skipping this file...`);
       console.error('Error identifying target nodes:', error);
       return [];
     }
   }
 
   private async modifyCodeSnippets(prompt: string, targetNodes: ASTNode[]): Promise<Map<string, string>> {
+    this.streamUpdate(`🔧 Claude AI is now modifying the specific code snippets for ${targetNodes.length} target nodes. This involves understanding the current code structure and applying your requested changes while maintaining functionality...`);
+    
     const snippetsInfo = targetNodes.map(node => 
       `**${node.id}:** (lines ${node.startLine}-${node.endLine})
 \`\`\`jsx
@@ -624,6 +675,8 @@ Return ONLY the JSON, nothing else.
     `.trim();
 
     try {
+      this.streamUpdate(`⚡ Sending code snippets to Claude AI for modification. The AI will analyze each snippet, understand the styling framework (Tailwind/CSS), and apply your requested changes appropriately...`);
+      
       const response = await this.anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
         max_tokens: 2000,
@@ -655,32 +708,42 @@ Return ONLY the JSON, nothing else.
               }
             }
             
+            this.streamUpdate(`✅ Code modification complete! Generated ${modMap.size} modified code snippets. Each modification preserves the original structure while applying your requested changes.`);
             return modMap;
           } catch (parseError) {
+            this.streamUpdate(`❌ Failed to parse Claude AI's modification response: ${parseError}. The AI response might be malformed.`);
             console.error('JSON parsing failed:', parseError);
           }
         }
       }
       
+      this.streamUpdate('⚠️ No valid modifications received from Claude AI. This might indicate the request couldn\'t be applied to the selected code snippets.');
       return new Map();
     } catch (error) {
+      this.streamUpdate(`❌ Error during code snippet modification: ${error}. This could be a connectivity issue or AI service problem.`);
       console.error('Error modifying code snippets:', error);
       return new Map();
     }
   }
 
   private async applyModifications(filePath: string, targetNodes: ASTNode[], modifications: Map<string, string>): Promise<boolean> {
+    this.streamUpdate(`💾 Applying ${modifications.size} code modifications to ${filePath}. This involves carefully replacing the exact AST node ranges with the new code while preserving file structure...`);
+    
     const file = this.projectFiles.get(filePath);
     if (!file) {
+      this.streamUpdate(`❌ File ${filePath} not found in project files. Cannot apply modifications.`);
       return false;
     }
 
     let modifiedContent = file.content;
     const lines = modifiedContent.split('\n');
     
+    this.streamUpdate(`📝 Sorting modifications by line number (bottom to top) to ensure line numbers remain valid during replacement process...`);
     const sortedNodes = targetNodes
       .filter(node => modifications.has(node.id))
       .sort((a, b) => b.startLine - a.startLine);
+    
+    this.streamUpdate(`🔄 Processing ${sortedNodes.length} modifications in reverse order to maintain line integrity...`);
     
     for (const node of sortedNodes) {
       const modifiedCode = modifications.get(node.id);
@@ -689,6 +752,7 @@ Return ONLY the JSON, nothing else.
         const endIndex = node.endLine - 1;
         const newLines = modifiedCode.split('\n');
         
+        this.streamUpdate(`📍 Replacing lines ${node.startLine}-${node.endLine} in ${filePath} with ${newLines.length} new lines of code...`);
         lines.splice(startIndex, endIndex - startIndex + 1, ...newLines);
       }
     }
@@ -696,9 +760,12 @@ Return ONLY the JSON, nothing else.
     modifiedContent = lines.join('\n');
     
     try {
+      this.streamUpdate(`💿 Writing modified content back to ${filePath}. Total size: ${modifiedContent.length} characters across ${lines.length} lines...`);
       await fs.writeFile(file.path, modifiedContent, 'utf8');
+      this.streamUpdate(`✅ Successfully saved ${filePath}! All modifications have been applied and the file is ready for use.`);
       return true;
     } catch (error) {
+      this.streamUpdate(`❌ Failed to save ${filePath}: ${error}. Check file permissions and disk space.`);
       console.error(`Failed to save ${filePath}:`, error);
       return false;
     }
@@ -706,21 +773,28 @@ Return ONLY the JSON, nothing else.
 
   async processModification(prompt: string, conversationContext?: string): Promise<ModificationResult> {
     try {
+      this.streamUpdate('🚀 Starting intelligent file modification workflow. This process uses advanced AST analysis and AI-powered code generation to make precise changes to your React application...');
+      
       await this.buildProjectTree();
       
       if (this.projectFiles.size === 0) {
+        this.streamUpdate('❌ No React files found in the project. Make sure you have a valid React project with a src directory containing .js, .jsx, .ts, or .tsx files.');
         return { success: false, error: 'No React files found in project' };
       }
 
+      this.streamUpdate('🔍 Determining relevant files and modification scope based on your request and conversation context...');
       let fileAnalysis = await this.identifyRelevantFiles(prompt, conversationContext);
       
       if (fileAnalysis.files.length === 0) {
+        this.streamUpdate('⚠️ Primary file identification found no matches. Attempting fallback search using keyword matching and pattern recognition...');
         const fallbackFiles = await this.fallbackFileSearch(prompt);
         
         if (fallbackFiles.length > 0) {
+          this.streamUpdate(`🔄 Fallback search successful! Found ${fallbackFiles.length} potential files. Determining modification scope...`);
           const scope = await this.determineScopeForFallbackFiles(prompt, fallbackFiles);
           fileAnalysis = { files: fallbackFiles, scope };
         } else {
+          this.streamUpdate('❌ Even fallback search couldn\'t find relevant files. Your request might not match any existing components or the project structure might be different than expected.');
           return { success: false, error: 'No relevant files found even after fallback search' };
         }
       }
@@ -730,15 +804,25 @@ Return ONLY the JSON, nothing else.
       }
 
       const { files: relevantFiles, scope } = fileAnalysis;
+      this.streamUpdate(`📋 Processing ${relevantFiles.length} files using ${scope} approach: ${relevantFiles.join(', ')}`);
 
       if (scope === 'FULL_FILE') {
+        this.streamUpdate('🔧 Using FULL_FILE modification approach. This will rewrite entire files while preserving functionality. Suitable for comprehensive changes like themes, layouts, or major restructuring...');
+        
         let successCount = 0;
         for (const filePath of relevantFiles) {
+          this.streamUpdate(`📄 Processing full file modification for ${filePath}...`);
           const success = await this.handleFullFileModification(prompt, filePath);
-          if (success) successCount++;
+          if (success) {
+            this.streamUpdate(`✅ Successfully completed full file modification for ${filePath}`);
+            successCount++;
+          } else {
+            this.streamUpdate(`❌ Full file modification failed for ${filePath}`);
+          }
         }
         
         if (successCount > 0) {
+          this.streamUpdate(`🎉 Full file modification workflow complete! Successfully modified ${successCount} out of ${relevantFiles.length} files. Your changes are now live!`);
           return {
             success: true,
             selectedFiles: relevantFiles,
@@ -757,9 +841,12 @@ Return ONLY the JSON, nothing else.
             }]
           };
         } else {
+          this.streamUpdate('❌ All full file modifications failed. This could be due to syntax errors, Claude AI limitations, or file permission issues.');
           return { success: false, error: 'Full file modifications failed' };
         }
       } else {
+        this.streamUpdate('🎯 Using TARGETED_NODES modification approach. This provides surgical precision by modifying only specific JSX elements while leaving the rest of the code untouched...');
+        
         const modifiedRanges: Array<{
           file: string;
           range: CodeRange;
@@ -767,27 +854,33 @@ Return ONLY the JSON, nothing else.
         }> = [];
 
         for (const filePath of relevantFiles) {
+          this.streamUpdate(`🔍 Processing ${filePath} with AST-based targeted modifications...`);
+          
           const astNodes = this.parseFileWithAST(filePath);
           
           if (astNodes.length === 0) {
+            this.streamUpdate(`⚠️ No AST nodes found in ${filePath}. This file might be empty, have syntax errors, or contain no JSX elements.`);
             continue;
           }
 
           const targetNodes = await this.identifyTargetNodes(prompt, filePath, astNodes);
           
           if (targetNodes.length === 0) {
+            this.streamUpdate(`ℹ️ No target nodes identified in ${filePath} for your request. This file doesn't contain elements that match your modification criteria.`);
             continue;
           }
 
           const modifications = await this.modifyCodeSnippets(prompt, targetNodes);
           
           if (modifications.size === 0) {
+            this.streamUpdate(`⚠️ No code modifications generated for ${filePath}. Claude AI might not have understood how to apply your request to the selected elements.`);
             continue;
           }
 
           const success = await this.applyModifications(filePath, targetNodes, modifications);
           
           if (success) {
+            this.streamUpdate(`✅ Successfully applied ${modifications.size} modifications to ${filePath}`);
             for (const node of targetNodes) {
               if (modifications.has(node.id)) {
                 modifiedRanges.push({
@@ -803,10 +896,13 @@ Return ONLY the JSON, nothing else.
                 });
               }
             }
+          } else {
+            this.streamUpdate(`❌ Failed to apply modifications to ${filePath}. Check file permissions and ensure the file is not locked.`);
           }
         }
 
         if (modifiedRanges.length > 0) {
+          this.streamUpdate(`🎉 Targeted modification workflow complete! Successfully applied ${modifiedRanges.length} precise code changes across ${relevantFiles.length} files. All modifications are now live in your application!`);
           return {
             success: true,
             selectedFiles: relevantFiles,
@@ -815,11 +911,13 @@ Return ONLY the JSON, nothing else.
             modifiedRanges
           };
         } else {
+          this.streamUpdate('❌ No AST modifications were successfully applied. This could mean the selected files don\'t contain the elements you want to modify, or there were issues with the modification process.');
           return { success: false, error: 'No AST modifications were successfully applied' };
         }
       }
       
     } catch (error) {
+      this.streamUpdate(`💥 Unexpected error in modification workflow: ${error instanceof Error ? error.message : 'Unknown error'}. This might be due to file system issues, network problems, or code parsing errors.`);
       console.error('Error in modification workflow:', error);
       return {
         success: false,

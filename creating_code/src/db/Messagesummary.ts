@@ -83,17 +83,15 @@ export class DrizzleMessageHistoryDB {
 
   // Maintain only 5 recent messages, summarize older ones
   private async maintainRecentMessages(): Promise<void> {
-    // Get all messages ordered by creation time
     const allMessages = await this.db.select().from(messages).orderBy(desc(messages.createdAt));
 
-    // If we have more than 5 messages, summarize the older ones
     if (allMessages.length > 5) {
       const recentMessages = allMessages.slice(0, 5);
       const oldMessages = allMessages.slice(5);
 
-      // Create summary from old messages
       if (oldMessages.length > 0) {
-        await this.createSummary(oldMessages);
+        // Update the single growing summary instead of creating new ones
+        await this.updateGrowingSummary(oldMessages);
       }
 
       // Delete old messages (keep only recent 5)
@@ -103,34 +101,84 @@ export class DrizzleMessageHistoryDB {
       }
     }
   }
-
-  // Create a summary from old messages using Claude
-  private async createSummary(oldMessages: Message[]): Promise<void> {
-    const { summary, keyTopics } = await this.generateSummary(oldMessages);
-
-    const newSummary: NewMessageSummary = {
-      summary,
-      messageCount: oldMessages.length,
-      startTime: oldMessages[oldMessages.length - 1].createdAt!, // Oldest first
-      endTime: oldMessages[0].createdAt!, // Newest first
-      keyTopics,
-      createdAt: new Date()
-    };
-
-    await this.db.insert(messageSummaries).values(newSummary);
-
-    // Update summary count in stats using SQL increment
+async fixConversationStats(): Promise<void> {
+  try {
+    // Count actual messages
+    const allMessages = await this.db.select().from(messages);
+    const messageCount = allMessages.length;
+    
+    // Count summaries
+    const summaries = await this.db.select().from(messageSummaries);
+    const summaryCount = summaries.length;
+    
+    // Get summary message count
+    const latestSummary = summaries[0];
+    const summarizedMessageCount = latestSummary?.messageCount || 0;
+    
+    // Calculate total messages
+    const totalMessages = messageCount + summarizedMessageCount;
+    
+    // Update stats
     await this.db.update(conversationStats)
       .set({
-        summaryCount: sql`${conversationStats.summaryCount} + 1`,
+        totalMessageCount: totalMessages,
+        summaryCount: summaryCount > 0 ? 1 : 0, // Since we only keep one summary
+        lastMessageAt: allMessages.length > 0 ? allMessages[allMessages.length - 1].createdAt : null,
         updatedAt: new Date()
       })
       .where(eq(conversationStats.id, 1));
+      
+    console.log(`✅ Fixed stats: ${totalMessages} total messages, ${summaryCount} summaries`);
+  } catch (error) {
+    console.error('Error fixing conversation stats:', error);
+  }
+}
+  private async updateGrowingSummary(newMessages: Message[]): Promise<void> {
+    // Get the existing summary
+    const existingSummaries = await this.db.select().from(messageSummaries).orderBy(desc(messageSummaries.createdAt)).limit(1);
+    const existingSummary = existingSummaries[0];
+
+    // Generate new content to add to summary
+    const { summary: newContent } = await this.generateSummaryUpdate(newMessages, existingSummary?.summary);
+
+    if (existingSummary) {
+      // Update existing summary by appending new content
+      await this.db.update(messageSummaries)
+        .set({
+          summary: newContent,
+          messageCount: existingSummary.messageCount + newMessages.length,
+          endTime: newMessages[0].createdAt!, // Most recent time
+          //@ts-ignore
+          updatedAt: new Date()
+        })
+        .where(eq(messageSummaries.id, existingSummary.id));
+    } else {
+      // Create first summary
+      const newSummary: NewMessageSummary = {
+        summary: newContent,
+        messageCount: newMessages.length,
+        startTime: newMessages[newMessages.length - 1].createdAt!, // Oldest
+        endTime: newMessages[0].createdAt!, // Newest
+        keyTopics: ['react', 'file-modification'],
+        createdAt: new Date()
+      };
+      await this.db.insert(messageSummaries).values(newSummary);
+    }
+
+    // Update summary count in stats
+    if (!existingSummary) {
+      await this.db.update(conversationStats)
+        .set({
+          summaryCount: 1,
+          updatedAt: new Date()
+        })
+        .where(eq(conversationStats.id, 1));
+    }
   }
 
-  // Generate summary using Claude
-  private async generateSummary(oldMessages: Message[]): Promise<{summary: string, keyTopics: string[]}> {
-    const messagesText = oldMessages.reverse().map(msg => {
+  // Generate updated summary using Claude
+  private async generateSummaryUpdate(newMessages: Message[], existingSummary?: string): Promise<{summary: string}> {
+    const newMessagesText = newMessages.reverse().map(msg => {
       let text = `[${msg.messageType.toUpperCase()}]: ${msg.content}`;
       if (msg.fileModifications && msg.fileModifications.length > 0) {
         text += ` (Modified: ${msg.fileModifications.join(', ')})`;
@@ -138,82 +186,74 @@ export class DrizzleMessageHistoryDB {
       return text;
     }).join('\n\n');
 
-    const claudePrompt = `
-Summarize this conversation about React file modifications. Focus on:
-1. What changes were requested
-2. Which files were modified  
-3. What approaches were used
-4. Any issues or successes
+    const claudePrompt = existingSummary 
+      ? `Update this existing conversation summary by incorporating the new messages:
 
-**Messages:**
-${messagesText}
+**EXISTING SUMMARY:**
+${existingSummary}
 
-**Response Format:**
-{
-  "summary": "Brief summary of the conversation",
-  "keyTopics": ["topic1", "topic2", "topic3"]
-}
+**NEW MESSAGES TO ADD:**
+${newMessagesText}
 
-Return only the JSON.
-    `.trim();
+**Instructions:**
+- Merge the new information into the existing summary
+- Keep the summary concise but comprehensive
+- Focus on: what was built/modified, key changes made, approaches used, files affected
+- Return only the updated summary text, no JSON`
+      : `Create a concise summary of this React development conversation:
+
+**MESSAGES:**
+${newMessagesText}
+
+**Instructions:**
+- Focus on: what was built/modified, key changes made, approaches used, files affected
+- Keep it concise but informative
+- Return only the summary text, no JSON`;
 
     try {
       const response = await this.anthropic.messages.create({
         model: 'claude-3-5-sonnet-20240620',
-        max_tokens: 500,
+        max_tokens: 800,
         temperature: 0,
         messages: [{ role: 'user', content: claudePrompt }],
       });
 
       const firstBlock = response.content[0];
       if (firstBlock?.type === 'text') {
-        const text = firstBlock.text;
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        
-        if (jsonMatch) {
-          const result = JSON.parse(jsonMatch[0]) as { summary: string; keyTopics: string[] };
-          return {
-            summary: result.summary,
-            keyTopics: result.keyTopics || []
-          };
-        }
+        return { summary: firstBlock.text.trim() };
       }
     } catch (error) {
-      console.error('Error generating summary:', error);
+      console.error('Error generating summary update:', error);
     }
 
-    // Fallback summary
-    return {
-      summary: `React modification conversation (${oldMessages.length} messages)`,
-      keyTopics: ['react', 'file-modification']
-    };
+    // Fallback
+    const fallbackSummary = existingSummary 
+      ? `${existingSummary}\n\nAdditional changes: React modifications (${newMessages.length} more messages)`
+      : `React development conversation (${newMessages.length} messages)`;
+      
+    return { summary: fallbackSummary };
   }
 
   // Get conversation context for file modification prompts
   async getConversationContext(): Promise<string> {
-    // Get summaries
-    const summaries = await this.db.select().from(messageSummaries).orderBy(desc(messageSummaries.createdAt));
+    // Get the single summary
+    const summaries = await this.db.select().from(messageSummaries).orderBy(desc(messageSummaries.createdAt)).limit(1);
     
     // Get recent messages
     const recentMessages = await this.db.select().from(messages).orderBy(desc(messages.createdAt));
 
     let context = '';
 
-    // Add summaries
+    // Add the single growing summary
     if (summaries.length > 0) {
-      context += '**Previous Conversation Summary:**\n';
-      summaries.forEach((summary, index) => {
-        context += `${index + 1}. ${summary.summary} (${summary.messageCount} messages)\n`;
-        if (summary.keyTopics && summary.keyTopics.length > 0) {
-          context += `   Topics: ${summary.keyTopics.join(', ')}\n`;
-        }
-      });
-      context += '\n';
+      const summary = summaries[0];
+      context += `**CONVERSATION SUMMARY (${summary.messageCount} previous messages):**\n`;
+      context += `${summary.summary}\n\n`;
     }
 
     // Add recent messages
     if (recentMessages.length > 0) {
-      context += '**Recent Messages:**\n';
+      context += '**RECENT MESSAGES:**\n';
       recentMessages.reverse().forEach((msg, index) => {
         context += `${index + 1}. [${msg.messageType.toUpperCase()}]: ${msg.content}\n`;
         if (msg.fileModifications && msg.fileModifications.length > 0) {
@@ -243,6 +283,21 @@ Return only the JSON.
       summaryCount: currentStats.summaryCount || 0,
       totalMessages: currentStats.totalMessageCount || 0
     };
+  }
+
+  // Get current summary for display - MOVED TO CORRECT CLASS
+  async getCurrentSummary(): Promise<{summary: string; messageCount: number} | null> {
+    const summaries = await this.db.select().from(messageSummaries).orderBy(desc(messageSummaries.createdAt)).limit(1);
+    
+    if (summaries.length > 0) {
+      const summary = summaries[0];
+      return {
+        summary: summary.summary,
+        messageCount: summary.messageCount
+      };
+    }
+    
+    return null;
   }
 
   // Get conversation stats

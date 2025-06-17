@@ -6,13 +6,12 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    headers: {
-      "Content-Security-Policy":
-        "default-src 'self'; " +
-        "frame-src 'self' http://localhost:3000 https://zewahrnmtqehbaduaewy.supabase.co/; " +
-        "script-src 'self' 'unsafe-inline'; " +
-        "style-src 'self' 'unsafe-inline'; " +
-        "connect-src 'self' ws://localhost:3000;",
-    },
-  },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      }
+    }
+  }
 });
